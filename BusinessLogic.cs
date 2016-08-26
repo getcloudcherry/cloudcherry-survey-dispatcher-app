@@ -21,7 +21,7 @@ namespace DispatcherScheduler
 
         public string GetCSVString(DispatcherConfig item)
         {
-            objservice.TraceService("Retreiving CSV string");
+            objservice.Writelog("Retreiving CSV string");
             string CSVstring = "";
 
             //If input folder is ftp  then downloading the input file and storing in local path.
@@ -33,12 +33,20 @@ namespace DispatcherScheduler
 
                 using (System.Net.WebClient client = new System.Net.WebClient())
                 {
-                    client.Credentials = new System.Net.NetworkCredential(item.ftpusername, item.ftppassword);
-                    string localfile = localpath + @"\survey.xlsx";
-                    if (item.InputFileType.ToUpper() == "CSV")
-                        localfile = localpath + @"\survey.csv";
-                    client.DownloadFile(new Uri(item.InputSource), localfile);
-                    item.InputSource = localfile;
+                    try
+                    {
+                        client.Credentials = new System.Net.NetworkCredential(item.ftpusername, item.ftppassword);
+                        string localfile = localpath + @"\survey.xlsx";
+                        if (item.InputFileType.ToUpper() == "CSV")
+                            localfile = localpath + @"\survey.csv";
+                        client.DownloadFile(new Uri(item.InputSource), localfile);
+                        item.InputSource = localfile;
+                    }
+                    catch (WebException ee)
+                    {
+                      objservice.Writelog("Invalid  FTP credentials or input path is not found");
+                        return "";
+                    }
                 }
 
             }
@@ -53,6 +61,10 @@ namespace DispatcherScheduler
             {
                 //Retreiving CSV string from excel file
                 CSVstring = GetExcelData(item.InputSource);
+            }
+            else
+            {
+              objservice.Writelog("Invalid Input type ('" + item.InputFileType + "') encountered ");
             }
             return CSVstring;
         }
@@ -186,20 +198,44 @@ namespace DispatcherScheduler
                 }
             }
 
-            objservice.TraceService("No question tag exist with name :" + tag);
+            objservice.Writelog("No question tag exist with name :" + tag);
             return "";
         }
 
         //Deserialising the content in  the Config.json file
         public List<DispatcherConfig> GetDispatcherlist()
         {
-            string filePath = ConfigurationManager.AppSettings["JsonConfigPath"];
+            //string filePath = ConfigurationManager.AppSettings["JsonConfigPath"];
+            //List<DispatcherConfig> items = new List<DispatcherConfig>();
+            //using (StreamReader r = new StreamReader(filePath))
+            //{
+            //    string json = r.ReadToEnd();
+            //    items = JsonConvert.DeserializeObject<List<DispatcherConfig>>(json);
+            //}            
+            //return items;
+
+
+            string filePath = ConfigurationManager.AppSettings["ClientsFilePath"];
             List<DispatcherConfig> items = new List<DispatcherConfig>();
             using (StreamReader r = new StreamReader(filePath))
             {
                 string json = r.ReadToEnd();
                 items = JsonConvert.DeserializeObject<List<DispatcherConfig>>(json);
-            }            
+                dynamic obj = JsonConvert.DeserializeObject(json);
+
+                int i = 0;
+                foreach (var oitem in obj)
+                {
+
+                    foreach (var result in oitem.InputMapping)
+                    {
+                        items[i].InputMapping = JsonConvert.DeserializeObject<Dictionary<string, string>>(result.ToString());
+
+                    }
+                    i++;
+                }
+
+            }
             return items;
         }
 
@@ -213,13 +249,13 @@ namespace DispatcherScheduler
             //Creating  temporary local path to store output response if the output location  is ftp folder
             if (objdispatcher.OutputLocationType.ToLower() == "ftp")
             {
-                objservice.TraceService("output location type : " + objdispatcher.OutputLocationType);
+                objservice.Writelog("output location type : " + objdispatcher.OutputLocationType);
                 string localpath = System.IO.Directory.GetCurrentDirectory();
                 path = localpath.Replace(@"bin\Debug", @"Files\");
-
+                path = path + "SurveyTokens_" + objdispatcher.CloudCherryAccount.ToUpper()+DateTime.Now.Millisecond + ".csv";//temporary path deleted later
             }
-            path = path + "SurveyTokens_" + objdispatcher.CloudCherryAccount.ToUpper() + ".csv";
-            objservice.TraceService("Writing into output csv file:" + path);
+           
+           
             FileStream fw;
             if (iscreate)
                 fw = new FileStream(path, FileMode.Create);
@@ -243,19 +279,24 @@ namespace DispatcherScheduler
             if (objdispatcher.OutputLocationType.ToLower() == "ftp")
             {
 
-                string ftppath = objdispatcher.OutputDestination + "SurveyTokens_" + objdispatcher.CloudCherryAccount.ToUpper() + ".csv";
+                string ftppath = objdispatcher.OutputDestination ;
 
                 System.Threading.AutoResetEvent waiter = new System.Threading.AutoResetEvent(false);
 
                 using (System.Net.WebClient client = new System.Net.WebClient())
                 {
-                    client.Credentials = new System.Net.NetworkCredential(objdispatcher.ftpusername, objdispatcher.ftppassword);
+                    try
+                    {
+                        client.Credentials = new System.Net.NetworkCredential(objdispatcher.ftpusername, objdispatcher.ftppassword);
 
-                    client.UploadFileCompleted += new UploadFileCompletedEventHandler(UploadFileCallback);
-                    client.UploadFileAsync(new Uri(ftppath), "STOR", path, waiter);
-                    waiter.WaitOne();
-                    objservice.TraceService("File uploaded to ftp");
-                    File.Delete(path);
+                        client.UploadFileCompleted += new UploadFileCompletedEventHandler(UploadFileCallback);
+                        client.UploadFileAsync(new Uri(ftppath), "STOR", path, waiter);
+                        waiter.WaitOne();
+                     
+                        File.Delete(path);
+                    }
+                    catch {  objservice.Writelog("Invalid FTP Credetials/Output path is not found"); return; }
+                         objservice.Writelog("File upload is complete.");
                 }
             }
 
@@ -263,24 +304,30 @@ namespace DispatcherScheduler
 
         private static void UploadFileCallback(Object sender, UploadFileCompletedEventArgs e)
         {
-            System.Threading.AutoResetEvent waiter = (System.Threading.AutoResetEvent)e.UserState; ;
+  try
+            {            System.Threading.AutoResetEvent waiter = (System.Threading.AutoResetEvent)e.UserState; ;
             try
             {
                 string reply = System.Text.Encoding.UTF8.GetString(e.Result);
                 ScheduledService objservice = new ScheduledService();
-                objservice.TraceService(reply);
+                objservice.Writelog(reply);
             }
             finally
             {
                 waiter.Set();
-            }
+            } } catch
+            {
+                ScheduledService obj = new ScheduledService();
+                obj.Writelog("Invalid FTP Credentials/ Output path is not found");
+               
+               }
         }
 
 
         //Validating if the given prefill questions  in input file is valid or not
         public bool ValidatingPrefillQuestions(string CSVstring, List<Question> Ques)
         {
-            objservice.TraceService("Validating Questions");
+            objservice.Writelog("Validating Questions");
             int qcounter = 0;
             string[] delimiter = { "\r\n" };
             string[] csvlist = CSVstring.Split(delimiter, StringSplitOptions.None);
@@ -300,7 +347,7 @@ namespace DispatcherScheduler
         //Splitting CSV string  for every 50k rows  to upload bulk tokens
         public List<string> SplitsCSVstring(string csvstring)
         {
-            objservice.TraceService("Splitting csv string to bulk upload");
+            objservice.Writelog("Splitting csv string to bulk upload");
             string[] delimiter = { "\r\n" };
             List<string> finalcsv = new List<string>();
             string[] csvlist = csvstring.Split(delimiter, StringSplitOptions.RemoveEmptyEntries);
@@ -318,56 +365,196 @@ namespace DispatcherScheduler
 
             return finalcsv;
         }
+        public bool CheckforNULL(DispatcherConfig item)
+        {
+            
+            if (item.CloudCherryAccount == null)
+            {
+                objservice.Writelog("Username property is not available");
+                return false;
+            }
+            if (item.CloudCherryAPIEndPoint == null)
+            {
+                objservice.Writelog("Endpoint property is not available");
+                return false;
+            }
+            if (item.CloudCherrySecret == null)
+            {
+                objservice.Writelog("Password  propertyis not available");
+                return false;
+            }
+            if (item.ftppassword == null)
+            {
+                objservice.Writelog("FTPpassword property is not available");
+                return false;
+            }
+            if (item.ftpusername == null)
+            {
+                objservice.Writelog("FTPusername property is not available");
+                return false;
+            }
+            if (item.InputFileType == null)
+            {
+                objservice.Writelog("Inputtype property is not available");
+                return false;
+            }
+            if (item.InputLocationtype == null)
+            {
+                objservice.Writelog("Inputlocation type property is not available");
+                return false;
+            }
+            //if (item.InputMapping == null)
+            //{
+            //  objservice.Writelog("InputMapping property is not available");
+            //    return false;
+            //}
+            if (item.InputSource == null)
+            {
+                objservice.Writelog("InputSource property is not available");
+                return false;
+            }
+            if (item.Message == null)
+            {
+                objservice.Writelog("Message property is not available");
+                return false;
+            }
+            if (item.OutputDelay == null)
+            {
+                objservice.Writelog("Outputproperty is not available");
+                return false;
+            }
+            if (item.OutputDestination == null)
+            {
+                objservice.Writelog("OutputDestination property is not available");
+                return false;
+            }
+            if (item.OutputLocationType == null)
+            {
+                objservice.Writelog("OutputLocationtype property is not available");
+                return false;
+            }
+            if (item.OutputType == null)
+            {
+                objservice.Writelog("Outputtype property is not available");
+                return false;
+            }
+            if (item.SurveyLocation == null)
+            {
+                objservice.Writelog("SurveyLocation  property is not available");
+                return false;
+            }
+            if (item.SurveyUses == null)
+            {
+                objservice.Writelog("SurveyUses property is not available");
+                return false;
+            }
+            if (item.SurveyValidFor == null)
+            {
+                objservice.Writelog("SurveyValidFor property is not available");
+                return false;
+            }
+            return true;
 
+        }
         //Validating the input types mentioned in Config.json file
         public bool ValidatingFileTypes(DispatcherConfig item)
-        {
+        {if (!CheckforNULL(item))
+                return false;
+            objservice.Writelog("Validation File types ");
+            if(!CheckforNULL(item))
+                return false;
+        
+            if ( item.CloudCherryAccount.Trim() == string.Empty)
+            {
+              objservice.Writelog("User name is not available");
+                return false;
+            } if (item.CloudCherryAPIEndPoint.Trim() == string.Empty)
+            {
+              objservice.Writelog("End point is not available");
+                return false;
+            }
+            if (item.CloudCherrySecret.Trim() == string.Empty)
+            {
+              objservice.Writelog("Password is not available");
+                return false;
+            }
+            if (item.SurveyLocation.Trim() == string.Empty)
+            {
+              objservice.Writelog("Survey Location is not available");
+                return false;
+            }
+            if (item.InputLocationtype.Trim().ToLower() != "ftp" && item.InputLocationtype.Trim().ToLower() != "local")
+            {
+              objservice.Writelog("Input Location type ('" + item.InputLocationtype + "') is invalid");
+                return false;
+            }
+           
+            int tempint=0;
+            if (!int.TryParse(item.SurveyValidFor, out tempint))
+            {
+                item.SurveyValidFor = "30";
+            }
+            if (!int.TryParse(item.OutputDelay, out tempint))
+            {
+              objservice.Writelog("Invalid output delay ('"+item.OutputDelay+"') encountered");
+                return false;
+            }
 
+
+            if (!int.TryParse(item.SurveyUses, out tempint))
+            {
+                item.SurveyUses = "1";
+            }
+            
+            
             if (item.OutputLocationType.ToLower() == "ftp")
             {
+                if (item.ftppassword.Trim() == "")
+                {
+                  objservice.Writelog("FTP password not available");
+                    return false;
+                }
+                if (item.ftpusername.Trim() == "")
+                {
+                  objservice.Writelog("FTP Username not available");
+                    return false;
+                }
                 if (item.OutputType.ToLower() == "email" || item.OutputType.ToLower() == "sms")
                 {
-                    objservice.TraceService("output type cannot be " + item.OutputType + " when output location type is ftp");
+                  objservice.Writelog("Output type cannot be " + item.OutputType + " when output location type is ftp");
                     return false;
                 }
             }
 
             if ((item.InputFileType.ToLower() == "csv") && (Path.GetExtension(item.InputSource).ToLower() != ".csv"))
             {
-                objservice.TraceService("Input file Extension '" + Path.GetExtension(item.InputSource) + "' is not matching with input file type :'" + item.InputFileType + "'");
+                objservice.Writelog("Input file Extension '" + Path.GetExtension(item.InputSource) + "' is not matching with input file type :'" + item.InputFileType + "'");
 
                 return false;
 
             }
             if ((item.InputFileType.ToLower() == "excel") && (Path.GetExtension(item.InputSource).ToLower() != ".xlsx"))
             {
-                objservice.TraceService("Input file Extension '" + Path.GetExtension(item.InputSource) + "' is not matching with input file type :'" + item.InputFileType + "'");
+                objservice.Writelog("Input file Extension '" + Path.GetExtension(item.InputSource) + "' is not matching with input file type :'" + item.InputFileType + "'");
 
                 return false;
 
             }
 
-            if ((item.OutputType.ToLower() == "csv") && (Path.GetExtension(item.OutputDestination).ToLower() == ".csv"))
+            if ((item.OutputType.ToLower() == "csv") && (Path.GetExtension(item.OutputDestination).ToLower() != ".csv"))
             {
-                objservice.TraceService("output file Extension  '" + Path.GetExtension(item.OutputDestination) + "' is not matching with input file type :'" + item.OutputType + "'");
+                objservice.Writelog("output file Extension  '" + Path.GetExtension(item.OutputDestination) + "' is not matching with input file type :'" + item.OutputType + "'");
 
                 return false;
             }
 
-            if ((item.InputFileType.ToLower() == "excel") || (item.InputFileType.ToLower() == "excel"))
-            {
-                if (!File.Exists(item.InputSource))
-                {
-                    objservice.TraceService("Input file  does not exist :" + item.InputSource);
-                    return false;
-                }
-            }
+          
 
-            if (item.OutputType.ToLower() == "csv")
+            if((item.OutputLocationType!="ftp")&& (item.OutputType.ToLower() == "csv"))
             {
-                if (!Directory.Exists(item.OutputDestination))
+                if( (item.InputFileType!="ftp")&&(!File.Exists(item.OutputDestination)))
                 {
-                    objservice.TraceService("Output file  does not exist :" + item.InputSource);
+                    objservice.Writelog("Output file  does not exist :" + item.InputSource);
                     return false;
                 }
             }
@@ -397,15 +584,16 @@ namespace DispatcherScheduler
                 string url = dt.Rows[r]["Survey_URL"].ToString();
 
                 string name = dt.Rows[r][namecolumn].ToString();
-                string parameters = objDispatcher.OutputDestination;
-                parameters = parameters.Replace("$msg", objDispatcher.Salutation + "\n" + objDispatcher.Message + "\n" + objDispatcher.Signature);
+                string parameters = objDispatcher.OutputDestination;//$Name
+                parameters = parameters.Replace("$msg",  objDispatcher.Message );
                 parameters = parameters.Replace("$url", url);
-                parameters = parameters.Replace("$to", mobile);
-                objservice.TraceService("sending sms to " + mobile + " with url " + url + " (" + (r + 1) + " of " + dt.Rows.Count + ")");
+                parameters = parameters.Replace("$to", mobile);  //Replacing static text with respective mobile number and token
+
+              objservice.Writelog("sending sms to " + mobile + " with url " + url + " (" + (r + 1) + " of " + dt.Rows.Count + ")");
                 var request = (HttpWebRequest)WebRequest.Create(parameters);//sending sms
                 request.GetResponse();
 
-                System.Threading.Thread.Sleep(objDispatcher.OutputDelay);
+                System.Threading.Thread.Sleep( int.Parse (objDispatcher.OutputDelay));
             }
         }
         //Retrieving respective email and mailing the token url details
@@ -428,14 +616,14 @@ namespace DispatcherScheduler
                 string email = dt.Rows[r][column].ToString();
                 string url = dt.Rows[r]["Survey_URL"].ToString();
                 string name = dt.Rows[r][namecolumn].ToString();
-                string parameters = objDispatcher.OutputDestination;
-                parameters = parameters.Replace("$msg", objDispatcher.Salutation + "\n" + objDispatcher.Message + "\n" + objDispatcher.Signature);
+                string parameters = objDispatcher.OutputDestination;//$Name
+                parameters = parameters.Replace("$msg",  objDispatcher.Message );
                 parameters = parameters.Replace("$url", url);
                 parameters = parameters.Replace("$to", email);
 
-                objservice.TraceService("sending mail to " + email + " with url " + url + " (" + (r + 1) + " of " + dt.Rows.Count + ")");
+                objservice.Writelog("sending mail to " + email + " with url " + url + " (" + (r + 1) + " of " + dt.Rows.Count + ")");
                 SendEmail(parameters);//sending mails
-                System.Threading.Thread.Sleep(objDispatcher.OutputDelay);
+                System.Threading.Thread.Sleep(int.Parse(objDispatcher.OutputDelay));
             }
         }
 
@@ -460,7 +648,7 @@ namespace DispatcherScheduler
             }
             catch (WebException ex)
             {
-                objservice.TraceService(ex.Message);
+                objservice.Writelog(ex.Message);
 
             }
 
@@ -481,17 +669,18 @@ namespace DispatcherScheduler
         public string OutputLocationType { get; set; } // OutLocationtype
         //Survey
         public string SurveyLocation { get; set; } // "Downtown"
-        public int SurveyValidFor { get; set; } // Days(Max is 90)
-        public int SurveyUses { get; set; }
+        public string SurveyValidFor { get; set; } // Days(Max is 90)
+        public string SurveyUses { get; set; }
 
         public string InputFileType { get; set; } // CSV/Excel/ODBC(Win Table)
         public string InputSource { get; set; } // Filename.csv/Filename.xlsx/ConnectionString(ODBC)
         internal Dictionary<string, string> InputMapping { get; set; } // CSV/Excel/Table Column to QuestionID
-        public string Salutation { get; set; }
+       
         public string Message { get; set; }
-        public string Signature { get; set; }
+     
         public string OutputType { get; set; } // CSV, URL(SMS), SMTP(Email), ODBC Update(Table)
-        public int OutputDelay { get; set; } // Millisecond delay between calls for SMS/Email to enable not overloading with millions of emails/sms in one go
+        public string OutputDelay { get; set; } // Millisecond delay between calls for SMS/Email to enable not overloading with millions of emails/sms in one go
         public string OutputDestination { get; set; } // https://x.y.z?sms=$NUM , "outfile.csv", "username:password@smtp.xyz.com:587/sender name/sender address"
+        public List<string> QuestionTags { get; set; }
     }
 }
