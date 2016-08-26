@@ -20,7 +20,7 @@ namespace DispatcherScheduler
         {
             InitializeComponent();
         }
-      public  static string schedularpath = "";
+      public  static string schedularlogpath = "";
         protected override void OnStart(string[] args)
         {
 
@@ -44,18 +44,18 @@ namespace DispatcherScheduler
             {
                 return;
             }
-            schedularpath = logFilePath + "DiapatcherAppLog_" + DateTime.Now.Year + "_" + DateTime.Now.Month + "_" + DateTime.Now.Day + "";
-            if (!Directory.Exists(schedularpath))
-                Directory.CreateDirectory(schedularpath);
-            string filepath = schedularpath + @"\" + DateTime.Now.Year + "_" + DateTime.Now.Month + "_" + DateTime.Now.Day + "_" + DateTime.Now.Hour + "_" + DateTime.Now.Minute + "_" + DateTime.Now.Second + ".log";
-            schedularpath = filepath;
+            schedularlogpath = logFilePath + "DiapatcherAppLog_" + DateTime.Now.Year + "_" + DateTime.Now.Month + "_" + DateTime.Now.Day + "";
+            if (!Directory.Exists(schedularlogpath))
+                Directory.CreateDirectory(schedularlogpath);
+            string filepath = schedularlogpath + @"\" + DateTime.Now.Year + "_" + DateTime.Now.Month + "_" + DateTime.Now.Day + "_" + DateTime.Now.Hour + "_" + DateTime.Now.Minute + "_" + DateTime.Now.Second + ".log";
+            schedularlogpath = filepath;
             string JsonConfigPath = ConfigurationManager.AppSettings["JsonConfigPath"];
             if (!File.Exists(JsonConfigPath))
             {
-                TraceService("Json file doesnot exist : " + JsonConfigPath);
+                Writelog("Json file doesnot exist : " + JsonConfigPath);
                 return;
             }
-            TraceService("service started");//service starts
+            Writelog("service started");//service starts
             CloudCherry objcloud = new CloudCherry();
             objcloud.ImportData();//function to import data into CloudCherry
         }
@@ -66,14 +66,14 @@ namespace DispatcherScheduler
 
         public void stopTimer()
         {
-            if (File.Exists(schedularpath))
-            TraceService("service stopped");
+            if (File.Exists(schedularlogpath))
+            Writelog("service stopped");
         }
 
         //TraceService -- Method used to log activities of the dispatcher app service
-        public void TraceService(string content)
+        public void Writelog(string content)
         {
-            FileStream fs = new FileStream(schedularpath, FileMode.OpenOrCreate, FileAccess.Write);
+            FileStream fs = new FileStream(schedularlogpath, FileMode.OpenOrCreate, FileAccess.Write);
             StreamWriter sw = new StreamWriter(fs);
             sw.BaseStream.Seek(0, SeekOrigin.End);
             sw.WriteLine("(" + DateTime.Now + ") " + content);
